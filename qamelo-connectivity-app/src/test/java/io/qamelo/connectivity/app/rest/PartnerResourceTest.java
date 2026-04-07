@@ -2,7 +2,6 @@ package io.qamelo.connectivity.app.rest;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -135,10 +134,59 @@ class PartnerResourceTest {
                 .statusCode(404);
     }
 
-    @Disabled("TODO Phase 4: channels table does not exist yet — hasChannels() always returns false")
     @Test
     void deletePartnerWithChannels() {
-        // When channels exist, deleting should return 409 CONFLICT
+        // Create partner
+        String partnerId = given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer test-token")
+                .body(Map.of(
+                        "name", "delete-blocked-partner-" + UUID.randomUUID()
+                ))
+                .when().post("/api/v1/partners")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        // Create connection (required for channel)
+        String connectionId = given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer test-token")
+                .body(Map.of(
+                        "name", "delete-blocked-conn-" + UUID.randomUUID(),
+                        "type", "SFTP",
+                        "host", "sftp.example.com",
+                        "port", 22,
+                        "authType", "BASIC"
+                ))
+                .when().post("/api/v1/connections")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        // Create channel referencing the partner
+        given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer test-token")
+                .body(Map.of(
+                        "name", "delete-blocked-channel-" + UUID.randomUUID(),
+                        "partnerId", partnerId,
+                        "connectionId", connectionId,
+                        "type", "SFTP",
+                        "direction", "OUTBOUND"
+                ))
+                .when().post("/api/v1/channels")
+                .then()
+                .statusCode(201);
+
+        // Try to delete partner -> 409 CONFLICT
+        given()
+                .header("Authorization", "Bearer test-token")
+                .when().delete("/api/v1/partners/" + partnerId)
+                .then()
+                .statusCode(409)
+                .body("error", equalTo("conflict"))
+                .body("message", containsString("channels"));
     }
 
     @Test

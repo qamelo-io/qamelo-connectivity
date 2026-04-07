@@ -58,4 +58,14 @@ public class PostgresConnectionRepository implements ConnectionRepository {
                         .chain(e -> e != null ? s.remove(e) : Uni.createFrom().voidItem())
         );
     }
+
+    @Override
+    public Uni<Boolean> hasChannels(UUID connectionId) {
+        return sf.withSession(s ->
+                s.createQuery("select count(c) from ChannelEntity c where c.connectionId = :connectionId", Long.class)
+                        .setParameter("connectionId", connectionId)
+                        .getSingleResult()
+                        .map(count -> count > 0)
+        );
+    }
 }

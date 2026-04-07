@@ -108,9 +108,12 @@ public class PostgresPartnerRepository implements PartnerRepository {
 
     @Override
     public Uni<Boolean> hasChannels(UUID partnerId) {
-        // TODO Phase 4: query channels table when it exists
-        // SELECT COUNT(*) > 0 FROM channels WHERE partner_id = :id
-        return Uni.createFrom().item(false);
+        return sf.withSession(s ->
+                s.createQuery("select count(c) from ChannelEntity c where c.partnerId = :partnerId", Long.class)
+                        .setParameter("partnerId", partnerId)
+                        .getSingleResult()
+                        .map(count -> count > 0)
+        );
     }
 
     private Uni<List<PartnerIdentifierEntity>> loadIdentifiers(Mutiny.Session s, UUID partnerId) {

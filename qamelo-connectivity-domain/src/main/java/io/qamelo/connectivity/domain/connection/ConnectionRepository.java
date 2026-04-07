@@ -16,4 +16,6 @@ public interface ConnectionRepository {
     Uni<Connection> update(Connection connection);
 
     Uni<Void> delete(UUID id);
+
+    Uni<Boolean> hasChannels(UUID connectionId);
 }

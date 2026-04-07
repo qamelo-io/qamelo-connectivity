@@ -133,18 +133,28 @@ public class ConnectionResource {
                                         .entity(Map.of("error", "not_found", "message", "Connection not found"))
                                         .build());
                     }
-                    Uni<Void> vaultCleanup = Uni.createFrom().voidItem();
-                    if (existing.getVaultCredentialPath() != null) {
-                        vaultCleanup = secretsClient.deleteCredential(existing.getVaultCredentialPath())
-                                .onFailure().recoverWithUni(ex -> {
-                                    LOG.warnf(ex, "Failed to delete Vault credential at %s for connection %s, proceeding with DB delete",
-                                            existing.getVaultCredentialPath(), id);
-                                    return Uni.createFrom().voidItem();
-                                });
-                    }
-                    return vaultCleanup
-                            .chain(() -> connectionRepository.delete(id))
-                            .map(v -> Response.noContent().build());
+                    return connectionRepository.hasChannels(id)
+                            .chain(hasChannels -> {
+                                if (hasChannels) {
+                                    return Uni.createFrom().item(
+                                            Response.status(Response.Status.CONFLICT)
+                                                    .entity(Map.of("error", "conflict",
+                                                            "message", "Cannot delete connection with active channels"))
+                                                    .build());
+                                }
+                                Uni<Void> vaultCleanup = Uni.createFrom().voidItem();
+                                if (existing.getVaultCredentialPath() != null) {
+                                    vaultCleanup = secretsClient.deleteCredential(existing.getVaultCredentialPath())
+                                            .onFailure().recoverWithUni(ex -> {
+                                                LOG.warnf(ex, "Failed to delete Vault credential at %s for connection %s, proceeding with DB delete",
+                                                        existing.getVaultCredentialPath(), id);
+                                                return Uni.createFrom().voidItem();
+                                            });
+                                }
+                                return vaultCleanup
+                                        .chain(() -> connectionRepository.delete(id))
+                                        .map(v -> Response.noContent().build());
+                            });
                 });
     }
 

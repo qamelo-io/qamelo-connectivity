@@ -429,6 +429,61 @@ class ConnectionResourceTest {
     }
 
     @Test
+    void deleteConnectionWithChannels() {
+        // Create connection
+        String connectionId = given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer test-token")
+                .body(Map.of(
+                        "name", "ch-block-conn-" + UUID.randomUUID(),
+                        "type", "SFTP",
+                        "host", "sftp.example.com",
+                        "port", 22,
+                        "authType", "BASIC"
+                ))
+                .when().post("/api/v1/connections")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        // Create partner (required for channel)
+        String partnerId = given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer test-token")
+                .body(Map.of(
+                        "name", "ch-block-partner-" + UUID.randomUUID()
+                ))
+                .when().post("/api/v1/partners")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        // Create channel referencing the connection
+        given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer test-token")
+                .body(Map.of(
+                        "name", "ch-block-channel-" + UUID.randomUUID(),
+                        "partnerId", partnerId,
+                        "connectionId", connectionId,
+                        "type", "SFTP",
+                        "direction", "OUTBOUND"
+                ))
+                .when().post("/api/v1/channels")
+                .then()
+                .statusCode(201);
+
+        // Try to delete connection -> 409 CONFLICT
+        given()
+                .header("Authorization", "Bearer test-token")
+                .when().delete("/api/v1/connections/" + connectionId)
+                .then()
+                .statusCode(409)
+                .body("error", equalTo("conflict"))
+                .body("message", containsString("channels"));
+    }
+
+    @Test
     void deleteConnectionWithCredentials() {
         // Create with credentials
         Map<String, Object> createBody = new HashMap<>();
