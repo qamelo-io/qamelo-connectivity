@@ -7,6 +7,7 @@ import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.hibernate.reactive.mutiny.Mutiny;
 
+import java.util.List;
 import java.util.UUID;
 
 @ApplicationScoped
@@ -35,6 +36,21 @@ public class PostgresConnectionRepository implements ConnectionRepository {
                                 .map(ConnectionMapper::toDomain)
                                 .toList())
         ).onItem().transformToMulti(list -> Multi.createFrom().iterable(list));
+    }
+
+    @Override
+    public Uni<List<Connection>> findByNames(List<String> names) {
+        if (names == null || names.isEmpty()) {
+            return Uni.createFrom().item(List.of());
+        }
+        return sf.withSession(s ->
+                s.createQuery("from ConnectionEntity where name in :names order by name", ConnectionEntity.class)
+                        .setParameter("names", names)
+                        .getResultList()
+                        .map(entities -> entities.stream()
+                                .map(ConnectionMapper::toDomain)
+                                .toList())
+        );
     }
 
     @Override

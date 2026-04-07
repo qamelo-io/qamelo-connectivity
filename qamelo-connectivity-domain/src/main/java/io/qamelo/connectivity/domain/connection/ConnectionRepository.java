@@ -3,6 +3,7 @@ package io.qamelo.connectivity.domain.connection;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface ConnectionRepository {
@@ -10,6 +11,8 @@ public interface ConnectionRepository {
     Uni<Connection> findById(UUID id);
 
     Multi<Connection> findAll();
+
+    Uni<List<Connection>> findByNames(List<String> names);
 
     Uni<Connection> save(Connection connection);
 

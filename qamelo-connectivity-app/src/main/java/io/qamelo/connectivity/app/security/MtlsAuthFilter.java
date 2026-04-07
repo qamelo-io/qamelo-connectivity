@@ -8,6 +8,7 @@ import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.security.cert.X509Certificate;
@@ -20,6 +21,9 @@ public class MtlsAuthFilter implements ContainerRequestFilter {
     private static final Logger LOG = Logger.getLogger(MtlsAuthFilter.class);
     private static final String INTERNAL_PREFIX = "/api/v1/internal";
     static final String CALLER_IDENTITY_ATTRIBUTE = "qamelo.caller.identity";
+
+    @ConfigProperty(name = "qamelo.mtls.enforce", defaultValue = "true")
+    boolean enforceMtls;
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
@@ -36,12 +40,16 @@ public class MtlsAuthFilter implements ContainerRequestFilter {
         }
 
         if (certs == null || certs.length == 0) {
-            LOG.debugf("No client certificate on internal path: %s", path);
-            requestContext.abortWith(
-                    Response.status(Response.Status.UNAUTHORIZED)
-                            .type(MediaType.APPLICATION_JSON)
-                            .entity("{\"error\":\"unauthorized\",\"message\":\"Client certificate required for internal endpoints\"}")
-                            .build());
+            if (enforceMtls) {
+                LOG.debugf("No client certificate on internal path: %s", path);
+                requestContext.abortWith(
+                        Response.status(Response.Status.UNAUTHORIZED)
+                                .type(MediaType.APPLICATION_JSON)
+                                .entity("{\"error\":\"unauthorized\",\"message\":\"Client certificate required for internal endpoints\"}")
+                                .build());
+            } else {
+                LOG.debugf("mTLS enforcement disabled — skipping cert check on internal path: %s", path);
+            }
             return;
         }
 
