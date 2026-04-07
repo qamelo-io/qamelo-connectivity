@@ -2,6 +2,7 @@ package io.qamelo.connectivity.infra.secrets;
 
 import io.qamelo.connectivity.domain.error.ConnectivityErrorCode;
 import io.qamelo.connectivity.domain.error.ConnectivityException;
+import io.qamelo.connectivity.domain.spi.PkiSignResponse;
 import io.qamelo.connectivity.domain.spi.SecretsClient;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.JsonObject;
@@ -12,6 +13,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.ConnectException;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
@@ -73,6 +75,60 @@ public class SecretsHttpClient implements SecretsClient {
 
         return webClient.deleteAbs(url)
                 .send()
+                .replaceWithVoid()
+                .onFailure(SecretsHttpClient::isConnectionFailure)
+                .transform(ex -> new ConnectivityException(
+                        ConnectivityErrorCode.SERVICE_UNAVAILABLE,
+                        "Secrets service unavailable: " + ex.getMessage(), ex));
+    }
+
+    // PKI operations
+
+    private static final String PKI_SIGN_PATH = "/api/v1/internal/secrets/pki/sign";
+    private static final String PKI_REVOKE_PATH = "/api/v1/internal/secrets/pki/revoke";
+
+    @Override
+    public Uni<PkiSignResponse> signCsr(String pkiMount, String role, String csr,
+                                         String commonName, String subjectAltName, String ttl) {
+        String url = secretsUrl + PKI_SIGN_PATH;
+        JsonObject body = new JsonObject()
+                .put("pkiMount", pkiMount)
+                .put("role", role)
+                .put("csr", csr)
+                .put("commonName", commonName)
+                .put("subjectAltName", subjectAltName)
+                .put("ttl", ttl);
+        LOG.debugf("Signing CSR via secrets service: mount=%s, role=%s, cn=%s", pkiMount, role, commonName);
+
+        return webClient.postAbs(url)
+                .putHeader("Content-Type", "application/json")
+                .sendJsonObject(body)
+                .map(response -> {
+                    JsonObject json = response.bodyAsJsonObject();
+                    return new PkiSignResponse(
+                            json.getString("certificate"),
+                            json.getString("caChain"),
+                            json.getString("serialNumber"),
+                            Instant.parse(json.getString("expiration"))
+                    );
+                })
+                .onFailure(SecretsHttpClient::isConnectionFailure)
+                .transform(ex -> new ConnectivityException(
+                        ConnectivityErrorCode.SERVICE_UNAVAILABLE,
+                        "Secrets service unavailable: " + ex.getMessage(), ex));
+    }
+
+    @Override
+    public Uni<Void> revokeCertificate(String pkiMount, String serialNumber) {
+        String url = secretsUrl + PKI_REVOKE_PATH;
+        JsonObject body = new JsonObject()
+                .put("pkiMount", pkiMount)
+                .put("serialNumber", serialNumber);
+        LOG.debugf("Revoking certificate via secrets service: mount=%s, serial=%s", pkiMount, serialNumber);
+
+        return webClient.postAbs(url)
+                .putHeader("Content-Type", "application/json")
+                .sendJsonObject(body)
                 .replaceWithVoid()
                 .onFailure(SecretsHttpClient::isConnectionFailure)
                 .transform(ex -> new ConnectivityException(

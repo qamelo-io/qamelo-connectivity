@@ -24,7 +24,8 @@ public class JwtAuthFilter implements ContainerRequestFilter {
 
     private static final Set<String> BYPASS_PREFIXES = Set.of(
             "/q/health",
-            "/api/v1/internal"
+            "/api/v1/internal",
+            "/api/v1/agents/register"   // registration uses one-time token, not JWT
     );
 
     @Inject

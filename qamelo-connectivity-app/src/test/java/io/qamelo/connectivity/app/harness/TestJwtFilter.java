@@ -26,8 +26,11 @@ public class TestJwtFilter implements ContainerRequestFilter {
 
     private static final Set<String> BYPASS_PREFIXES = Set.of(
             "/q/health",
-            "/api/v1/internal"
+            "/api/v1/internal",
+            "/api/v1/agents/register"   // registration uses one-time token, not JWT
     );
+    // TODO: Agent-specific endpoints (/{id}/renew-cert, /{id}/config, /{id}/status) use JWT
+    // auth in tests. In production, AgentCertFilter would handle mTLS auth for these.
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
