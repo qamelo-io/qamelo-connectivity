@@ -1,0 +1,34 @@
+replicaCount: 1
+
+image:
+  repository: localhost:5001/qamelo-connectivity
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 9002
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+postgresql:
+  host: qamelo-connectivity-postgresql
+  port: 5432
+  database: qamelo_connectivity
+  username: qamelo
+
+iam:
+  internalUrl: https://qamelo-iam.qamelo-system.svc.cluster.local:9000
+  jwksUrl: http://qamelo-iam.qamelo-system.svc.cluster.local:9000/.well-known/jwks.json
+  jwtIssuer: http://qamelo-iam.qamelo-system.svc.cluster.local:9000
+
+tls:
+  certPath: /etc/qamelo/tls/tls.crt
+  keyPath: /etc/qamelo/tls/tls.key
+  caPath: /etc/qamelo/tls/ca.crt

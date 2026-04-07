@@ -1,0 +1,6 @@
+apiVersion: v2
+name: qamelo-connectivity
+description: Connectivity, B2B, and Agent Management service
+type: application
+version: 0.1.0
+appVersion: "0.1.0-SNAPSHOT"
