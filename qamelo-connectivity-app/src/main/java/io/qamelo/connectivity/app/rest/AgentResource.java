@@ -256,6 +256,7 @@ public class AgentResource {
                                 agent.setCertExpiresAt(pkiResponse.expiration());
                                 agent.setCertSubjectSan(agentSan);
                                 agent.setModifiedAt(Instant.now());
+                                // TODO: Create ManagedCertificate record for cert tracking integration
                                 return agentRepository.update(agent)
                                         .map(updated -> Response.ok(
                                                 new RegistrationResponse(
@@ -300,6 +301,7 @@ public class AgentResource {
                                 agent.setCertSerialNumber(pkiResponse.serialNumber());
                                 agent.setCertExpiresAt(pkiResponse.expiration());
                                 agent.setModifiedAt(Instant.now());
+                                // TODO: Update ManagedCertificate record for cert tracking integration
                                 return agentRepository.update(agent)
                                         .map(updated -> Response.ok(
                                                 new RenewalResponse(
