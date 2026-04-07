@@ -71,7 +71,11 @@ public class PostgresAgentRepository implements AgentRepository {
 
     @Override
     public Uni<Boolean> hasVirtualHosts(UUID agentId) {
-        // TODO Phase 6: query virtual_hosts table when it exists
-        return Uni.createFrom().item(false);
+        return sf.withSession(s ->
+                s.createQuery("select count(v) from VirtualHostEntity v where v.agentId = :agentId", Long.class)
+                        .setParameter("agentId", agentId)
+                        .getSingleResult()
+                        .map(count -> count > 0)
+        );
     }
 }

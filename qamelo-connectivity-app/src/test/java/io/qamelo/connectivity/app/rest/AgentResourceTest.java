@@ -412,13 +412,14 @@ class AgentResourceTest {
                 .then()
                 .statusCode(200);
 
-        // Get config
+        // Get config — response is { agent: {...}, virtualHosts: [...] }
         given()
                 .header("Authorization", "Bearer test-token")
                 .when().get("/api/v1/agents/" + agentId + "/config")
                 .then()
                 .statusCode(200)
-                .body("id", equalTo(agentId))
-                .body("status", equalTo("REGISTERED"));
+                .body("agent.id", equalTo(agentId))
+                .body("agent.status", equalTo("REGISTERED"))
+                .body("virtualHosts", notNullValue());
     }
 }

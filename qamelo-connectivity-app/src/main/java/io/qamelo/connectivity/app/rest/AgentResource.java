@@ -5,6 +5,7 @@ import io.qamelo.connectivity.app.security.auth.AuthorizationService;
 import io.qamelo.connectivity.domain.agent.Agent;
 import io.qamelo.connectivity.domain.agent.AgentRepository;
 import io.qamelo.connectivity.domain.agent.AgentStatus;
+import io.qamelo.connectivity.domain.agent.VirtualHostRepository;
 import io.qamelo.connectivity.domain.spi.SecretsClient;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
@@ -48,6 +49,9 @@ public class AgentResource {
 
     @Inject
     SecretsClient secretsClient;
+
+    @Inject
+    VirtualHostRepository virtualHostRepository;
 
     @ConfigProperty(name = "qamelo.gateway.url", defaultValue = "https://gateway.qamelo.io")
     String gatewayUrl;
@@ -307,7 +311,6 @@ public class AgentResource {
     }
 
     // --- Agent config endpoint ---
-    // TODO: Phase 6 will add virtual hosts to the config response.
 
     @GET
     @Path("/{id}/config")
@@ -316,13 +319,23 @@ public class AgentResource {
         String userId = (String) ctx.getProperty(JwtAuthFilter.USER_ID_PROPERTY);
         return authorizationService.requirePermission(userId, "agent:read")
                 .chain(() -> agentRepository.findById(id))
-                .map(agent -> {
+                .chain(agent -> {
                     if (agent == null) {
-                        return Response.status(Response.Status.NOT_FOUND)
-                                .entity(Map.of("error", "not_found", "message", "Agent not found"))
-                                .build();
+                        return Uni.createFrom().item(
+                                Response.status(Response.Status.NOT_FOUND)
+                                        .entity(Map.of("error", "not_found", "message", "Agent not found"))
+                                        .build());
                     }
-                    return Response.ok(toResponse(agent)).build();
+                    return virtualHostRepository.findByAgentId(id)
+                            .map(vhs -> {
+                                List<VirtualHostResponse> vhResponses = vhs.stream()
+                                        .map(VirtualHostResource::toResponse)
+                                        .toList();
+                                return Response.ok(Map.of(
+                                        "agent", toResponse(agent),
+                                        "virtualHosts", vhResponses
+                                )).build();
+                            });
                 });
     }
 
