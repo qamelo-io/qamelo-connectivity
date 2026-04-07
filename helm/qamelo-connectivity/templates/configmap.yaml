@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: qamelo-system
+  labels:
+    app.kubernetes.io/name: qamelo-connectivity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  QAMELO_RUNTIME_NAMESPACE: {{ .Values.k8s.runtimeNamespace }}

@@ -28,6 +28,20 @@ iam:
   jwksUrl: http://qamelo-iam.qamelo-system.svc.cluster.local:9000/.well-known/jwks.json
   jwtIssuer: http://qamelo-iam.qamelo-system.svc.cluster.local:9000
 
+secrets:
+  url: http://qamelo-secrets.qamelo-system.svc.cluster.local:9002
+
+gateway:
+  url: https://qamelo-gateway.qamelo-system.svc.cluster.local:9003
+
+k8s:
+  runtimeNamespace: qamelo-runtime
+  gatewayIp: ""  # auto-discovered or set manually
+
+serviceAccount:
+  create: true
+  name: qamelo-connectivity
+
 tls:
   certPath: /etc/qamelo/tls/tls.crt
   keyPath: /etc/qamelo/tls/tls.key

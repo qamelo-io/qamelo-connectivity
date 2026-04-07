@@ -18,6 +18,7 @@ spec:
         app.kubernetes.io/name: qamelo-connectivity
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
       containers:
         - name: qamelo-connectivity
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -44,6 +45,14 @@ spec:
               value: {{ .Values.iam.jwksUrl }}
             - name: QAMELO_JWT_ISSUER
               value: {{ .Values.iam.jwtIssuer }}
+            - name: QAMELO_SECRETS_URL
+              value: {{ .Values.secrets.url }}
+            - name: QAMELO_GATEWAY_URL
+              value: {{ .Values.gateway.url }}
+            - name: QAMELO_RUNTIME_NAMESPACE
+              value: {{ .Values.k8s.runtimeNamespace }}
+            - name: QAMELO_GATEWAY_IP
+              value: {{ .Values.k8s.gatewayIp | quote }}
           volumeMounts:
             - name: tls
               mountPath: /etc/qamelo/tls

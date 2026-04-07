@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: qamelo-connectivity-vhost-manager
+  labels:
+    app.kubernetes.io/name: qamelo-connectivity
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+    namespace: qamelo-system
+roleRef:
+  kind: ClusterRole
+  name: qamelo-connectivity-vhost-manager
+  apiGroup: rbac.authorization.k8s.io
