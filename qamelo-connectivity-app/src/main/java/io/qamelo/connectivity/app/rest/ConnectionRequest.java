@@ -13,5 +13,6 @@ public record ConnectionRequest(
         UUID agentId,
         Map<String, String> properties,
         String description,
-        String status
+        String status,
+        Map<String, String> credentials
 ) {}

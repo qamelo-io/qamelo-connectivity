@@ -8,6 +8,7 @@ import io.qamelo.connectivity.domain.connection.Connection;
 import io.qamelo.connectivity.domain.connection.ConnectionRepository;
 import io.qamelo.connectivity.domain.connection.ConnectionStatus;
 import io.qamelo.connectivity.domain.connection.ConnectionType;
+import io.qamelo.connectivity.domain.spi.SecretsClient;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -39,6 +40,9 @@ public class ConnectionResource {
 
     @Inject
     AuthorizationService authorizationService;
+
+    @Inject
+    SecretsClient secretsClient;
 
     @GET
     public Uni<List<ConnectionResponse>> list(@Context jakarta.ws.rs.container.ContainerRequestContext ctx) {
@@ -75,6 +79,12 @@ public class ConnectionResource {
         return authorizationService.requirePermission(userId, "connection:manage")
                 .chain(() -> {
                     Connection connection = fromRequest(request, userId);
+                    if (hasCredentials(request)) {
+                        String vaultPath = vaultPath(connection.getId());
+                        return secretsClient.writeCredential(vaultPath, request.credentials())
+                                .invoke(() -> connection.setVaultCredentialPath(vaultPath))
+                                .chain(() -> connectionRepository.save(connection));
+                    }
                     return connectionRepository.save(connection);
                 })
                 .map(saved -> Response.status(Response.Status.CREATED)
@@ -100,7 +110,8 @@ public class ConnectionResource {
                                         .build());
                     }
                     applyUpdate(existing, request, userId);
-                    return connectionRepository.update(existing)
+                    return handleCredentialUpdate(existing, request)
+                            .chain(() -> connectionRepository.update(existing))
                             .map(updated -> Response.ok(toResponse(updated)).build());
                 })
                 .onFailure(IllegalArgumentException.class)
@@ -122,10 +133,53 @@ public class ConnectionResource {
                                         .entity(Map.of("error", "not_found", "message", "Connection not found"))
                                         .build());
                     }
-                    // Phase 1: no cascade check (no channels/virtual hosts yet)
-                    return connectionRepository.delete(id)
+                    Uni<Void> vaultCleanup = Uni.createFrom().voidItem();
+                    if (existing.getVaultCredentialPath() != null) {
+                        vaultCleanup = secretsClient.deleteCredential(existing.getVaultCredentialPath())
+                                .onFailure().recoverWithUni(ex -> {
+                                    LOG.warnf(ex, "Failed to delete Vault credential at %s for connection %s, proceeding with DB delete",
+                                            existing.getVaultCredentialPath(), id);
+                                    return Uni.createFrom().voidItem();
+                                });
+                    }
+                    return vaultCleanup
+                            .chain(() -> connectionRepository.delete(id))
                             .map(v -> Response.noContent().build());
                 });
+    }
+
+    /**
+     * Handle credential update semantics:
+     * - credentials non-null + non-empty -> overwrite in Vault
+     * - credentials null -> leave unchanged
+     * - credentials non-null + empty map -> delete from Vault, clear path
+     */
+    private Uni<Void> handleCredentialUpdate(Connection existing, ConnectionRequest request) {
+        if (request.credentials() == null) {
+            // Credentials absent — leave unchanged
+            return Uni.createFrom().voidItem();
+        }
+        if (request.credentials().isEmpty()) {
+            // Empty map — delete from Vault and clear path
+            if (existing.getVaultCredentialPath() != null) {
+                String pathToDelete = existing.getVaultCredentialPath();
+                existing.setVaultCredentialPath(null);
+                return secretsClient.deleteCredential(pathToDelete)
+                        .onFailure().recoverWithUni(ex -> {
+                            LOG.warnf(ex, "Failed to delete Vault credential at %s during update, path cleared anyway",
+                                    pathToDelete);
+                            return Uni.createFrom().voidItem();
+                        });
+            }
+            existing.setVaultCredentialPath(null);
+            return Uni.createFrom().voidItem();
+        }
+        // Non-empty credentials — overwrite in Vault
+        String vaultPath = existing.getVaultCredentialPath() != null
+                ? existing.getVaultCredentialPath()
+                : vaultPath(existing.getId());
+        return secretsClient.writeCredential(vaultPath, request.credentials())
+                .invoke(() -> existing.setVaultCredentialPath(vaultPath));
     }
 
     private Connection fromRequest(ConnectionRequest request, String userId) {
@@ -137,10 +191,10 @@ public class ConnectionResource {
                 request.host(),
                 request.port(),
                 AuthType.valueOf(request.authType()),
-                null, // vaultCredentialPath — Phase 2
+                null, // vaultCredentialPath — set after Vault write
                 request.certManagement() != null ? CertManagement.valueOf(request.certManagement()) : null,
-                null, // vaultClientCertPath — Phase 2
-                null, // vaultTrustStorePath — Phase 2
+                null, // vaultClientCertPath — future phase
+                null, // vaultTrustStorePath — future phase
                 request.agentId(),
                 request.properties(),
                 request.description(),
@@ -188,5 +242,13 @@ public class ConnectionResource {
                 c.getModifiedAt() != null ? c.getModifiedAt().toString() : null,
                 c.getModifiedBy()
         );
+    }
+
+    private static boolean hasCredentials(ConnectionRequest request) {
+        return request.credentials() != null && !request.credentials().isEmpty();
+    }
+
+    private static String vaultPath(UUID connectionId) {
+        return "connectivity/connections/" + connectionId + "/credentials";
     }
 }
