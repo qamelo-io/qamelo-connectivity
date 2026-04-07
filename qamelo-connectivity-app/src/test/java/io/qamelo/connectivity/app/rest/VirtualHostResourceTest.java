@@ -268,7 +268,7 @@ class VirtualHostResourceTest {
                 .then()
                 .statusCode(201);
 
-        // Get agent config — should include virtual hosts
+        // Get agent config — should include virtual hosts (wrapped in VirtualHostConfigEntry)
         given()
                 .header("Authorization", "Bearer test-token")
                 .when().get("/api/v1/agents/" + agentId + "/config")
@@ -276,7 +276,7 @@ class VirtualHostResourceTest {
                 .statusCode(200)
                 .body("agent.id", equalTo(agentId))
                 .body("virtualHosts.size()", greaterThanOrEqualTo(1))
-                .body("virtualHosts[0].hostname", notNullValue());
+                .body("virtualHosts[0].virtualHost.hostname", notNullValue());
     }
 
     // --- Helper ---

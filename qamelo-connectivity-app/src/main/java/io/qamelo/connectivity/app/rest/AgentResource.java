@@ -5,7 +5,12 @@ import io.qamelo.connectivity.app.security.auth.AuthorizationService;
 import io.qamelo.connectivity.domain.agent.Agent;
 import io.qamelo.connectivity.domain.agent.AgentRepository;
 import io.qamelo.connectivity.domain.agent.AgentStatus;
+import io.qamelo.connectivity.domain.agent.VirtualHost;
 import io.qamelo.connectivity.domain.agent.VirtualHostRepository;
+import io.qamelo.connectivity.domain.connection.Connection;
+import io.qamelo.connectivity.domain.connection.ConnectionRepository;
+import io.qamelo.connectivity.domain.connection.ConnectionStatus;
+import io.qamelo.connectivity.domain.spi.GatewayClient;
 import io.qamelo.connectivity.domain.spi.SecretsClient;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
@@ -29,7 +34,10 @@ import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Path("/api/v1/agents")
 @Produces(MediaType.APPLICATION_JSON)
@@ -49,6 +57,12 @@ public class AgentResource {
 
     @Inject
     SecretsClient secretsClient;
+
+    @Inject
+    GatewayClient gatewayClient;
+
+    @Inject
+    ConnectionRepository connectionRepository;
 
     @Inject
     VirtualHostRepository virtualHostRepository;
@@ -186,6 +200,7 @@ public class AgentResource {
                                             });
                                 }
                                 return revoke
+                                        .chain(() -> gatewayClient.removeRoutes(id))
                                         .chain(() -> agentRepository.delete(id))
                                         .map(v -> Response.noContent().build());
                             });
@@ -329,16 +344,68 @@ public class AgentResource {
                                         .build());
                     }
                     return virtualHostRepository.findByAgentId(id)
-                            .map(vhs -> {
-                                List<VirtualHostResponse> vhResponses = vhs.stream()
-                                        .map(VirtualHostResource::toResponse)
+                            .chain(vhs -> {
+                                // Collect distinct connectionIds from VHs
+                                List<UUID> connectionIds = vhs.stream()
+                                        .map(VirtualHost::getConnectionId)
+                                        .filter(Objects::nonNull)
+                                        .distinct()
                                         .toList();
-                                return Response.ok(Map.of(
-                                        "agent", toResponse(agent),
-                                        "virtualHosts", vhResponses
-                                )).build();
+
+                                // Load connections if any
+                                Uni<Map<UUID, Connection>> connectionsUni;
+                                if (connectionIds.isEmpty()) {
+                                    connectionsUni = Uni.createFrom().item(Map.of());
+                                } else {
+                                    connectionsUni = loadConnections(connectionIds);
+                                }
+
+                                return connectionsUni.map(connMap -> {
+                                    List<AgentConfigResponse.VirtualHostConfigEntry> entries = vhs.stream()
+                                            .map(vh -> {
+                                                String vaultPath = null;
+                                                if (vh.getConnectionId() != null) {
+                                                    Connection conn = connMap.get(vh.getConnectionId());
+                                                    if (conn != null) {
+                                                        vaultPath = conn.getVaultCredentialPath();
+                                                    }
+                                                }
+                                                return new AgentConfigResponse.VirtualHostConfigEntry(
+                                                        VirtualHostResource.toResponse(vh), vaultPath);
+                                            })
+                                            .toList();
+
+                                    // configVersion = latest modification timestamp among agent + VHs
+                                    Instant latestMod = agent.getModifiedAt() != null ? agent.getModifiedAt() : agent.getCreatedAt();
+                                    for (VirtualHost vh : vhs) {
+                                        Instant vhMod = vh.getModifiedAt() != null ? vh.getModifiedAt() : vh.getCreatedAt();
+                                        if (vhMod.isAfter(latestMod)) {
+                                            latestMod = vhMod;
+                                        }
+                                    }
+
+                                    AgentConfigResponse configResponse = new AgentConfigResponse(
+                                            toResponse(agent), entries, gatewayUrl, latestMod.toString());
+                                    return Response.ok(configResponse).build();
+                                });
                             });
                 });
+    }
+
+    private Uni<Map<UUID, Connection>> loadConnections(List<UUID> connectionIds) {
+        // Load connections one by one and collect into a map
+        Uni<Map<UUID, Connection>> result = Uni.createFrom().item(new java.util.HashMap<>());
+        for (UUID connId : connectionIds) {
+            result = result.chain(map ->
+                    connectionRepository.findById(connId)
+                            .map(conn -> {
+                                if (conn != null) {
+                                    map.put(conn.getId(), conn);
+                                }
+                                return map;
+                            }));
+        }
+        return result;
     }
 
     // --- Agent status report endpoint ---
@@ -366,7 +433,55 @@ public class AgentResource {
                     }
                     agent.setModifiedAt(Instant.now());
                     return agentRepository.update(agent)
-                            .map(updated -> Response.ok(toResponse(updated)).build());
+                            .chain(updated -> processHostHealth(id, report))
+                            .map(updated -> Response.ok(toResponse(agent)).build());
+                });
+    }
+
+    /**
+     * Process per-host health reports: update connection status based on reachability.
+     * - unreachable -> connection ERROR
+     * - reachable + was ERROR -> connection ACTIVE
+     */
+    private Uni<Void> processHostHealth(UUID agentId, AgentStatusReport report) {
+        if (report.hostHealth() == null || report.hostHealth().isEmpty()) {
+            return Uni.createFrom().voidItem();
+        }
+        return virtualHostRepository.findByAgentId(agentId)
+                .chain(vhs -> {
+                    // Build hostname -> VirtualHost map
+                    Map<String, VirtualHost> vhByHostname = vhs.stream()
+                            .collect(Collectors.toMap(VirtualHost::getHostname, Function.identity(), (a, b) -> a));
+
+                    Uni<Void> chain = Uni.createFrom().voidItem();
+                    for (AgentStatusReport.HostHealthReport hhr : report.hostHealth()) {
+                        VirtualHost vh = vhByHostname.get(hhr.hostname());
+                        if (vh == null || vh.getConnectionId() == null) {
+                            continue;
+                        }
+                        UUID connId = vh.getConnectionId();
+                        chain = chain.chain(() ->
+                                connectionRepository.findById(connId)
+                                        .chain(conn -> {
+                                            if (conn == null) {
+                                                return Uni.createFrom().voidItem();
+                                            }
+                                            if (!hhr.reachable()
+                                                    && conn.getStatus() != ConnectionStatus.ERROR) {
+                                                conn.setStatus(ConnectionStatus.ERROR);
+                                                conn.setModifiedAt(Instant.now());
+                                                return connectionRepository.update(conn).replaceWithVoid();
+                                            }
+                                            if (hhr.reachable()
+                                                    && conn.getStatus() == ConnectionStatus.ERROR) {
+                                                conn.setStatus(ConnectionStatus.ACTIVE);
+                                                conn.setModifiedAt(Instant.now());
+                                                return connectionRepository.update(conn).replaceWithVoid();
+                                            }
+                                            return Uni.createFrom().voidItem();
+                                        }));
+                    }
+                    return chain;
                 });
     }
 

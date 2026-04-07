@@ -8,6 +8,7 @@ import io.qamelo.connectivity.domain.agent.VirtualHost;
 import io.qamelo.connectivity.domain.agent.VirtualHostProtocol;
 import io.qamelo.connectivity.domain.agent.VirtualHostRepository;
 import io.qamelo.connectivity.domain.agent.VirtualHostStatus;
+import io.qamelo.connectivity.domain.spi.GatewayClient;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -46,6 +47,12 @@ public class VirtualHostResource {
 
     @Inject
     KubernetesServiceManager kubernetesServiceManager;
+
+    @Inject
+    GatewayClient gatewayClient;
+
+    @Inject
+    RoutingTableAssembler routingTableAssembler;
 
     @ConfigProperty(name = "qamelo.k8s.runtime-namespace", defaultValue = "qamelo-runtime")
     String runtimeNamespace;
@@ -123,8 +130,10 @@ public class VirtualHostResource {
                     return kubernetesServiceManager.createService(namespace, vh.getHostname(),
                                     agentId, vhId, gatewayIp, targetPort)
                             .chain(() -> virtualHostRepository.save(vh))
-                            .map(saved -> Response.status(Response.Status.CREATED)
-                                    .entity(toResponse(saved)).build())
+                            .chain(saved -> routingTableAssembler.assembleFullTable()
+                                    .chain(entries -> gatewayClient.pushRoutingTable(entries))
+                                    .map(v -> Response.status(Response.Status.CREATED)
+                                            .entity(toResponse(saved)).build()))
                             .onFailure().recoverWithItem(ex -> {
                                 LOG.errorf(ex, "Failed to create K8s service or save virtual host %s", request.hostname());
                                 return Response.status(Response.Status.SERVICE_UNAVAILABLE)
@@ -186,7 +195,9 @@ public class VirtualHostResource {
                     existing.setModifiedAt(Instant.now());
                     existing.setModifiedBy(userId);
                     return virtualHostRepository.update(existing)
-                            .map(updated -> Response.ok(toResponse(updated)).build());
+                            .chain(updated -> routingTableAssembler.assembleFullTable()
+                                    .chain(entries -> gatewayClient.pushRoutingTable(entries))
+                                    .map(v -> Response.ok(toResponse(updated)).build()));
                 })
                 .onFailure(IllegalArgumentException.class)
                 .recoverWithItem(ex -> Response.status(Response.Status.BAD_REQUEST)
@@ -212,7 +223,7 @@ public class VirtualHostResource {
                             .chain(agent -> {
                                 String namespace = (agent != null && agent.getK8sNamespace() != null)
                                         ? agent.getK8sNamespace() : runtimeNamespace;
-                                // 1) Delete from DB first, 2) Best-effort K8s cleanup
+                                // 1) Delete from DB first, 2) Best-effort K8s cleanup, 3) Push routing table
                                 return virtualHostRepository.delete(vhId)
                                         .chain(() -> kubernetesServiceManager.deleteService(namespace, existing.getHostname())
                                                 .onFailure().recoverWithUni(ex -> {
@@ -220,6 +231,8 @@ public class VirtualHostResource {
                                                             existing.getHostname(), vhId);
                                                     return Uni.createFrom().voidItem();
                                                 }))
+                                        .chain(() -> routingTableAssembler.assembleFullTable()
+                                                .chain(entries -> gatewayClient.pushRoutingTable(entries)))
                                         .map(v -> Response.noContent().build());
                             });
                 });
